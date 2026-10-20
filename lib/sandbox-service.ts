@@ -219,6 +219,65 @@ async function removeSandboxResources(sandbox: Pick<Sandbox, "id" | "containerId
   }
 }
 
+// A Docker resource is accounted for while its row is mid-create or mid-delete (those flows own their
+// resources), or when the row records it as its own. Anything else labelled as ours is an orphan.
+function ownsResource(row: Sandbox | undefined, matches: (row: Sandbox) => boolean) {
+  return !!row && (row.status === "PROVISIONING" || row.status === "DELETING" || matches(row));
+}
+
+// Brings Docker and the database back in line, in both directions:
+// - containers and volumes labelled sandbox-studio.managed=true that no live row owns (row missing,
+//   DELETED, or pointing at a different resource) are removed;
+// - RUNNING/STOPPED rows whose container is gone are re-synced, which marks them FAILED so the idle
+//   reaper later destroys them.
+// Resources younger than minAgeMs are skipped so a row being written by another instance isn't raced.
+export async function reconcileDockerResources(minAgeMs: number) {
+  const docker = getDocker();
+  const managed = { label: ["sandbox-studio.managed=true"] };
+  // List Docker before reading rows: createSandbox writes its row before creating resources, so every
+  // resource listed here already has its row visible below.
+  const containers = await docker.listContainers({ all: true, filters: managed });
+  const { Volumes: volumes } = await docker.listVolumes({ filters: managed });
+  const rows = await prisma.sandbox.findMany({ where: { status: { not: "DELETED" } } });
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const cutoff = Date.now() - minAgeMs;
+
+  for (const container of containers) {
+    if (container.Created * 1000 > cutoff) continue;
+    const row = rowsById.get(container.Labels["sandbox-studio.sandbox-id"]);
+    if (ownsResource(row, (r) => r.containerId === container.Id)) continue;
+    try {
+      await docker.getContainer(container.Id).remove({ force: true, v: false });
+      console.warn(`[reconcile] Removed orphaned container ${container.Id}`);
+    } catch (error) {
+      if (!isNotFound(error)) console.error(`[reconcile] Failed to remove orphaned container ${container.Id}: ${errorMessage(error)}`);
+    }
+  }
+
+  // Volumes go after containers, since Docker won't remove a volume an orphaned container still uses.
+  for (const volume of volumes ?? []) {
+    // CreatedAt is returned by the Docker API but missing from the dockerode types.
+    const createdAt = Date.parse((volume as { CreatedAt?: string }).CreatedAt ?? "");
+    if (createdAt > cutoff) continue;
+    const row = rowsById.get(volume.Labels?.["sandbox-studio.sandbox-id"]);
+    if (ownsResource(row, (r) => r.volumeName === volume.Name)) continue;
+    try {
+      await docker.getVolume(volume.Name).remove();
+      console.warn(`[reconcile] Removed orphaned volume ${volume.Name}`);
+    } catch (error) {
+      if (!isNotFound(error)) console.error(`[reconcile] Failed to remove orphaned volume ${volume.Name}: ${errorMessage(error)}`);
+    }
+  }
+
+  const liveContainerIds = new Set(containers.map((container) => container.Id));
+  for (const row of rows) {
+    if ((row.status !== "RUNNING" && row.status !== "STOPPED") || !row.containerId || liveContainerIds.has(row.containerId)) continue;
+    // syncSandboxStatus inspects the container itself, so one created after the listing above is
+    // not mistaken for missing.
+    await syncSandboxStatus(row);
+  }
+}
+
 // Cleans up after a createSandbox call that never finished (e.g. the server crashed mid-way) and
 // marks the record FAILED, mirroring createSandbox's own failure path. Throws if cleanup fails,
 // leaving the record PROVISIONING so the reaper retries later.

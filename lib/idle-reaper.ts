@@ -1,6 +1,6 @@
 import type { SandboxStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { deleteSandbox, failInterruptedProvisioning, stopSandbox } from "@/lib/sandbox-service";
+import { deleteSandbox, failInterruptedProvisioning, reconcileDockerResources, stopSandbox } from "@/lib/sandbox-service";
 import { errorMessage } from "@/lib/docker";
 
 const DEFAULT_IDLE_STOP_MS = 5 * 60 * 1000;
@@ -105,6 +105,9 @@ async function recoverStuckSandboxes() {
 
 export async function reapIdleSandboxes() {
   await recoverStuckSandboxes();
+  // Reuses STUCK_MS as the grace period: a resource that young may belong to a create still in flight.
+  try { await reconcileDockerResources(STUCK_MS); }
+  catch (error) { console.error(`[idle-reaper] Docker reconciliation failed: ${errorMessage(error)}`); }
   await destroyIdleSandboxes();
   await stopIdleSandboxes();
 }
