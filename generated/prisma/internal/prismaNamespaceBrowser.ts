@@ -85,6 +85,7 @@ export const SandboxScalarFieldEnum = {
   networkEnabled: 'networkEnabled',
   failureReason: 'failureReason',
   lastCommandAt: 'lastCommandAt',
+  lastActivityAt: 'lastActivityAt',
   startedAt: 'startedAt',
   stoppedAt: 'stoppedAt',
   createdAt: 'createdAt',

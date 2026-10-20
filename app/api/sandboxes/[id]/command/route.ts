@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const inspected = await exec.inspect();
-    await prisma.sandbox.update({ where: { id }, data: { lastCommandAt: new Date() } });
+    await prisma.sandbox.update({ where: { id }, data: { lastCommandAt: new Date(), lastActivityAt: new Date() } });
     await addSandboxEvent(id, "COMMAND_EXECUTED", "A command was executed in this sandbox.", {
       exitCode: inspected.ExitCode ?? null,
       timedOut: inspected.ExitCode === 124 || inspected.ExitCode === 137,

@@ -44,6 +44,8 @@ model Sandbox {
   networkEnabled Boolean       @default(false)
   failureReason  String?       @db.Text
   lastCommandAt  DateTime?
+  // Bumped whenever the sandbox is used; the idle reaper destroys sandboxes that go quiet.
+  lastActivityAt DateTime      @default(now())
   startedAt      DateTime?
   stoppedAt      DateTime?
   createdAt      DateTime      @default(now())
@@ -51,6 +53,7 @@ model Sandbox {
   events         SandboxEvent[]
 
   @@index([status, createdAt])
+  @@index([status, lastActivityAt])
   @@index([createdAt])
 }
 

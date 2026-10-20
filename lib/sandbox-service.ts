@@ -17,6 +17,11 @@ export async function addSandboxEvent(
   });
 }
 
+// Record that the sandbox is in use so the idle reaper leaves it alone.
+export async function touchSandbox(id: string) {
+  await prisma.sandbox.update({ where: { id }, data: { lastActivityAt: new Date() } });
+}
+
 function isNotFound(error: unknown) {
   return typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: number }).statusCode === 404;
 }
@@ -61,9 +66,11 @@ export async function listSandboxes() {
   return Promise.all(rows.map((row) => syncSandboxStatus(row)));
 }
 
+// Every per-sandbox API call (view, logs, command) goes through here, so reading counts as activity.
 export async function getSandbox(id: string) {
   const row = await prisma.sandbox.findUnique({ where: { id }, include: { events: { orderBy: { createdAt: "desc" }, take: 20 } } });
   if (!row) return null;
+  if (row.status !== "DELETED" && row.status !== "DELETING") await touchSandbox(id);
   const synced = await syncSandboxStatus(row);
   return { ...synced, events: row.events };
 }
@@ -130,7 +137,7 @@ export async function createSandbox(input: CreateSandboxInput) {
 
     const updated = await prisma.sandbox.update({
       where: { id: dbRecord.id },
-      data: { containerId: container.id, status: "RUNNING", startedAt: new Date(), failureReason: null },
+      data: { containerId: container.id, status: "RUNNING", startedAt: new Date(), lastActivityAt: new Date(), failureReason: null },
     });
     await addSandboxEvent(updated.id, "CREATED", "Sandbox created and started.", {
       image, cpuCores: input.cpuCores, memoryMb: input.memoryMb,
@@ -170,12 +177,13 @@ export async function startSandbox(id: string) {
   await container.start().catch((error: unknown) => {
     if (!(typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: number }).statusCode === 304)) throw error;
   });
-  const updated = await prisma.sandbox.update({ where: { id }, data: { status: "RUNNING", startedAt: new Date(), stoppedAt: null, failureReason: null } });
+  const updated = await prisma.sandbox.update({ where: { id }, data: { status: "RUNNING", startedAt: new Date(), lastActivityAt: new Date(), stoppedAt: null, failureReason: null } });
   await addSandboxEvent(id, "STARTED", "Sandbox started.");
   return updated;
 }
 
-export async function stopSandbox(id: string) {
+// `idleReason` marks an automatic stop by the idle reaper, which must not count as activity.
+export async function stopSandbox(id: string, idleReason?: string) {
   const { sandbox, container } = await requireSandboxWithContainer(id);
   if (!sandbox) throw new Error("Sandbox not found.");
   if (sandbox.status === "DELETED") throw new Error("This sandbox has been deleted.");
@@ -184,12 +192,15 @@ export async function stopSandbox(id: string) {
       if (!(typeof error === "object" && error !== null && "statusCode" in error && [304, 404].includes(Number((error as { statusCode?: number }).statusCode)))) throw error;
     });
   }
-  const updated = await prisma.sandbox.update({ where: { id }, data: { status: "STOPPED", stoppedAt: new Date() } });
-  await addSandboxEvent(id, "STOPPED", "Sandbox stopped.");
+  const updated = await prisma.sandbox.update({
+    where: { id },
+    data: { status: "STOPPED", stoppedAt: new Date(), ...(idleReason ? {} : { lastActivityAt: new Date() }) },
+  });
+  await addSandboxEvent(id, "STOPPED", idleReason ?? "Sandbox stopped.");
   return updated;
 }
 
-export async function deleteSandbox(id: string) {
+export async function deleteSandbox(id: string, eventMessage = "Sandbox container and workspace volume removed.") {
   const sandbox = await prisma.sandbox.findUnique({ where: { id } });
   if (!sandbox) throw new Error("Sandbox not found.");
   if (sandbox.status === "DELETED") return sandbox;
@@ -212,7 +223,7 @@ export async function deleteSandbox(id: string) {
     where: { id },
     data: { status: "DELETED", containerId: null, volumeName: null, stoppedAt: new Date(), failureReason: null },
   });
-  await addSandboxEvent(id, "DELETED", "Sandbox container and workspace volume removed.");
+  await addSandboxEvent(id, "DELETED", eventMessage);
   return updated;
 }
 

@@ -50,6 +50,7 @@ export type SandboxMinAggregateOutputType = {
   networkEnabled: boolean | null
   failureReason: string | null
   lastCommandAt: Date | null
+  lastActivityAt: Date | null
   startedAt: Date | null
   stoppedAt: Date | null
   createdAt: Date | null
@@ -70,6 +71,7 @@ export type SandboxMaxAggregateOutputType = {
   networkEnabled: boolean | null
   failureReason: string | null
   lastCommandAt: Date | null
+  lastActivityAt: Date | null
   startedAt: Date | null
   stoppedAt: Date | null
   createdAt: Date | null
@@ -90,6 +92,7 @@ export type SandboxCountAggregateOutputType = {
   networkEnabled: number
   failureReason: number
   lastCommandAt: number
+  lastActivityAt: number
   startedAt: number
   stoppedAt: number
   createdAt: number
@@ -122,6 +125,7 @@ export type SandboxMinAggregateInputType = {
   networkEnabled?: true
   failureReason?: true
   lastCommandAt?: true
+  lastActivityAt?: true
   startedAt?: true
   stoppedAt?: true
   createdAt?: true
@@ -142,6 +146,7 @@ export type SandboxMaxAggregateInputType = {
   networkEnabled?: true
   failureReason?: true
   lastCommandAt?: true
+  lastActivityAt?: true
   startedAt?: true
   stoppedAt?: true
   createdAt?: true
@@ -162,6 +167,7 @@ export type SandboxCountAggregateInputType = {
   networkEnabled?: true
   failureReason?: true
   lastCommandAt?: true
+  lastActivityAt?: true
   startedAt?: true
   stoppedAt?: true
   createdAt?: true
@@ -269,6 +275,7 @@ export type SandboxGroupByOutputType = {
   networkEnabled: boolean
   failureReason: string | null
   lastCommandAt: Date | null
+  lastActivityAt: Date
   startedAt: Date | null
   stoppedAt: Date | null
   createdAt: Date
@@ -312,6 +319,7 @@ export type SandboxWhereInput = {
   networkEnabled?: Prisma.BoolFilter<"Sandbox"> | boolean
   failureReason?: Prisma.StringNullableFilter<"Sandbox"> | string | null
   lastCommandAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFilter<"Sandbox"> | Date | string
   startedAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
   stoppedAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"Sandbox"> | Date | string
@@ -333,6 +341,7 @@ export type SandboxOrderByWithRelationInput = {
   networkEnabled?: Prisma.SortOrder
   failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   lastCommandAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  lastActivityAt?: Prisma.SortOrder
   startedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   stoppedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -357,6 +366,7 @@ export type SandboxWhereUniqueInput = Prisma.AtLeast<{
   networkEnabled?: Prisma.BoolFilter<"Sandbox"> | boolean
   failureReason?: Prisma.StringNullableFilter<"Sandbox"> | string | null
   lastCommandAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFilter<"Sandbox"> | Date | string
   startedAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
   stoppedAt?: Prisma.DateTimeNullableFilter<"Sandbox"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"Sandbox"> | Date | string
@@ -378,6 +388,7 @@ export type SandboxOrderByWithAggregationInput = {
   networkEnabled?: Prisma.SortOrder
   failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   lastCommandAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  lastActivityAt?: Prisma.SortOrder
   startedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   stoppedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -406,6 +417,7 @@ export type SandboxScalarWhereWithAggregatesInput = {
   networkEnabled?: Prisma.BoolWithAggregatesFilter<"Sandbox"> | boolean
   failureReason?: Prisma.StringNullableWithAggregatesFilter<"Sandbox"> | string | null
   lastCommandAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Sandbox"> | Date | string | null
+  lastActivityAt?: Prisma.DateTimeWithAggregatesFilter<"Sandbox"> | Date | string
   startedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Sandbox"> | Date | string | null
   stoppedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Sandbox"> | Date | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Sandbox"> | Date | string
@@ -426,6 +438,7 @@ export type SandboxCreateInput = {
   networkEnabled?: boolean
   failureReason?: string | null
   lastCommandAt?: Date | string | null
+  lastActivityAt?: Date | string
   startedAt?: Date | string | null
   stoppedAt?: Date | string | null
   createdAt?: Date | string
@@ -447,6 +460,7 @@ export type SandboxUncheckedCreateInput = {
   networkEnabled?: boolean
   failureReason?: string | null
   lastCommandAt?: Date | string | null
+  lastActivityAt?: Date | string
   startedAt?: Date | string | null
   stoppedAt?: Date | string | null
   createdAt?: Date | string
@@ -468,6 +482,7 @@ export type SandboxUpdateInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -489,6 +504,7 @@ export type SandboxUncheckedUpdateInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -510,6 +526,7 @@ export type SandboxCreateManyInput = {
   networkEnabled?: boolean
   failureReason?: string | null
   lastCommandAt?: Date | string | null
+  lastActivityAt?: Date | string
   startedAt?: Date | string | null
   stoppedAt?: Date | string | null
   createdAt?: Date | string
@@ -530,6 +547,7 @@ export type SandboxUpdateManyMutationInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -550,6 +568,7 @@ export type SandboxUncheckedUpdateManyInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -570,6 +589,7 @@ export type SandboxCountOrderByAggregateInput = {
   networkEnabled?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
   lastCommandAt?: Prisma.SortOrder
+  lastActivityAt?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   stoppedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -595,6 +615,7 @@ export type SandboxMaxOrderByAggregateInput = {
   networkEnabled?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
   lastCommandAt?: Prisma.SortOrder
+  lastActivityAt?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   stoppedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -615,6 +636,7 @@ export type SandboxMinOrderByAggregateInput = {
   networkEnabled?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
   lastCommandAt?: Prisma.SortOrder
+  lastActivityAt?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   stoppedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -703,6 +725,7 @@ export type SandboxCreateWithoutEventsInput = {
   networkEnabled?: boolean
   failureReason?: string | null
   lastCommandAt?: Date | string | null
+  lastActivityAt?: Date | string
   startedAt?: Date | string | null
   stoppedAt?: Date | string | null
   createdAt?: Date | string
@@ -723,6 +746,7 @@ export type SandboxUncheckedCreateWithoutEventsInput = {
   networkEnabled?: boolean
   failureReason?: string | null
   lastCommandAt?: Date | string | null
+  lastActivityAt?: Date | string
   startedAt?: Date | string | null
   stoppedAt?: Date | string | null
   createdAt?: Date | string
@@ -759,6 +783,7 @@ export type SandboxUpdateWithoutEventsInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -779,6 +804,7 @@ export type SandboxUncheckedUpdateWithoutEventsInput = {
   networkEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastCommandAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  lastActivityAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   stoppedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -830,6 +856,7 @@ export type SandboxSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   networkEnabled?: boolean
   failureReason?: boolean
   lastCommandAt?: boolean
+  lastActivityAt?: boolean
   startedAt?: boolean
   stoppedAt?: boolean
   createdAt?: boolean
@@ -852,6 +879,7 @@ export type SandboxSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   networkEnabled?: boolean
   failureReason?: boolean
   lastCommandAt?: boolean
+  lastActivityAt?: boolean
   startedAt?: boolean
   stoppedAt?: boolean
   createdAt?: boolean
@@ -872,6 +900,7 @@ export type SandboxSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   networkEnabled?: boolean
   failureReason?: boolean
   lastCommandAt?: boolean
+  lastActivityAt?: boolean
   startedAt?: boolean
   stoppedAt?: boolean
   createdAt?: boolean
@@ -892,13 +921,14 @@ export type SandboxSelectScalar = {
   networkEnabled?: boolean
   failureReason?: boolean
   lastCommandAt?: boolean
+  lastActivityAt?: boolean
   startedAt?: boolean
   stoppedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type SandboxOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "description" | "runtime" | "image" | "containerId" | "volumeName" | "status" | "cpuCores" | "memoryMb" | "networkEnabled" | "failureReason" | "lastCommandAt" | "startedAt" | "stoppedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["sandbox"]>
+export type SandboxOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "description" | "runtime" | "image" | "containerId" | "volumeName" | "status" | "cpuCores" | "memoryMb" | "networkEnabled" | "failureReason" | "lastCommandAt" | "lastActivityAt" | "startedAt" | "stoppedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["sandbox"]>
 export type SandboxInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   events?: boolean | Prisma.Sandbox$eventsArgs<ExtArgs>
   _count?: boolean | Prisma.SandboxCountOutputTypeDefaultArgs<ExtArgs>
@@ -925,6 +955,7 @@ export type $SandboxPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     networkEnabled: boolean
     failureReason: string | null
     lastCommandAt: Date | null
+    lastActivityAt: Date
     startedAt: Date | null
     stoppedAt: Date | null
     createdAt: Date
@@ -1366,6 +1397,7 @@ export interface SandboxFieldRefs {
   readonly networkEnabled: Prisma.FieldRef<"Sandbox", 'Boolean'>
   readonly failureReason: Prisma.FieldRef<"Sandbox", 'String'>
   readonly lastCommandAt: Prisma.FieldRef<"Sandbox", 'DateTime'>
+  readonly lastActivityAt: Prisma.FieldRef<"Sandbox", 'DateTime'>
   readonly startedAt: Prisma.FieldRef<"Sandbox", 'DateTime'>
   readonly stoppedAt: Prisma.FieldRef<"Sandbox", 'DateTime'>
   readonly createdAt: Prisma.FieldRef<"Sandbox", 'DateTime'>
