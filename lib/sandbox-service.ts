@@ -242,7 +242,7 @@ export async function deleteSandbox(id: string, eventMessage = "Sandbox containe
     await removeSandboxResources(sandbox);
   } catch (error) {
     // Stay in DELETING rather than FAILED: the container may still be running (with unless-stopped),
-    // and the idle reaper only retries DELETING rows. FAILED rows are never reaped.
+    // and DELETING rows are retried after SANDBOX_STUCK_MS rather than waiting out the idle timer.
     const reason = `Delete failed: ${errorMessage(error)}`.slice(0, 1000);
     await prisma.sandbox.update({ where: { id }, data: { failureReason: reason } });
     await addSandboxEvent(id, "FAILED", "Sandbox delete failed; it will be retried automatically.", { reason });

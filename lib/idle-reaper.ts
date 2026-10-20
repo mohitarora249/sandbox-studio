@@ -1,3 +1,4 @@
+import type { SandboxStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteSandbox, failInterruptedProvisioning, stopSandbox } from "@/lib/sandbox-service";
 import { errorMessage } from "@/lib/docker";
@@ -25,18 +26,22 @@ function formatDuration(ms: number) {
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
 }
 
+// Sandboxes in these states can still hold a container and workspace volume once idle. FAILED is
+// included because an OOM-killed or vanished container keeps its volume until something removes it.
+const DESTROYABLE_STATUSES: SandboxStatus[] = ["RUNNING", "STOPPED", "FAILED"];
+
 // Destroys sandboxes (container + workspace volume) idle for IDLE_DESTROY_MS.
 async function destroyIdleSandboxes() {
   const cutoff = new Date(Date.now() - IDLE_DESTROY_MS);
   const idle = await prisma.sandbox.findMany({
-    where: { status: { in: ["RUNNING", "STOPPED"] }, lastActivityAt: { lt: cutoff } },
+    where: { status: { in: DESTROYABLE_STATUSES }, lastActivityAt: { lt: cutoff } },
     select: { id: true },
   });
 
   for (const { id } of idle) {
     // Claim atomically so a request that just touched the sandbox, or another app instance, wins the race.
     const claimed = await prisma.sandbox.updateMany({
-      where: { id, status: { in: ["RUNNING", "STOPPED"] }, lastActivityAt: { lt: cutoff } },
+      where: { id, status: { in: DESTROYABLE_STATUSES }, lastActivityAt: { lt: cutoff } },
       data: { status: "DELETING" },
     });
     if (claimed.count === 0) continue;
