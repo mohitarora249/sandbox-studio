@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 
 type RouteContext = { params: Promise<{ id: string }> };
 const MAX_OUTPUT_BYTES = 24_000;
+const COMMAND_TIMEOUT_MS = 15_000;
 
 export async function POST(request: NextRequest, context: RouteContext) {
   if (!(await requireAdmin(request))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -33,12 +34,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // `timeout` caps execution; the workspace is writable but the container root filesystem is not.
     // Anything the command detached escapes `timeout`, so strays are killed once the exec exits.
     const exec = await container.exec({
-      Cmd: ["/usr/bin/timeout", "--signal=KILL", "15s", "/bin/sh", "-lc", parsed.data.command],
+      Cmd: ["/usr/bin/timeout", "--signal=KILL", `${COMMAND_TIMEOUT_MS / 1000}s`, "/bin/sh", "-lc", parsed.data.command],
       AttachStdout: true,
       AttachStderr: true,
       Tty: false,
       User: "10001:10001",
     });
+    const startedAt = Date.now();
     const stream = await exec.start({ hijack: true, stdin: false });
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -102,17 +104,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
     stream.destroy();
 
     const inspected = await exec.inspect();
+    const exitCode = inspected.ExitCode ?? null;
+    // `timeout --signal=KILL` exits 137 when it fires, but so does anything else that SIGKILLs the
+    // command, most often the OOM killer. Only a kill after the full time limit can be the timeout.
+    const timedOut = exitCode === 124 || (exitCode === 137 && Date.now() - startedAt >= COMMAND_TIMEOUT_MS);
+    const killed = exitCode === 137 && !timedOut;
     // Running a command is real use, unlike viewing the sandbox, so it resets the idle timers.
     await prisma.sandbox.update({ where: { id }, data: { lastCommandAt: new Date(), lastActivityAt: new Date() } });
     await addSandboxEvent(id, "COMMAND_EXECUTED", "A command was executed in this sandbox.", {
-      exitCode: inspected.ExitCode ?? null,
-      timedOut: inspected.ExitCode === 124 || inspected.ExitCode === 137,
+      exitCode,
+      timedOut,
+      killed,
     });
     return NextResponse.json({
       stdout: decode("stdout"),
       stderr: decode("stderr"),
-      exitCode: inspected.ExitCode,
-      timedOut: inspected.ExitCode === 124 || inspected.ExitCode === 137,
+      exitCode,
+      timedOut,
+      killed,
       truncated,
     });
   } catch (error) {
