@@ -94,6 +94,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     stream.destroy();
 
     const inspected = await exec.inspect();
+    // Running a command is real use, unlike viewing the sandbox, so it resets the idle timers.
     await prisma.sandbox.update({ where: { id }, data: { lastCommandAt: new Date(), lastActivityAt: new Date() } });
     await addSandboxEvent(id, "COMMAND_EXECUTED", "A command was executed in this sandbox.", {
       exitCode: inspected.ExitCode ?? null,

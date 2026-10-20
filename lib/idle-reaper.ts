@@ -1,25 +1,35 @@
 import type { SandboxStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { deleteSandbox, failInterruptedProvisioning, reconcileDockerResources, stopIdleSandbox } from "@/lib/sandbox-service";
+import { deleteSandbox, failInterruptedProvisioning, idleSinceFilter, reconcileDockerResources, stopIdleSandbox } from "@/lib/sandbox-service";
+import { recordWorkloadActivity } from "@/lib/activity-sampler";
 import { errorMessage } from "@/lib/docker";
 
 const DEFAULT_IDLE_STOP_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_DESTROY_MS = 10 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 30 * 1000;
 const DEFAULT_STUCK_MS = 10 * 60 * 1000;
+const DEFAULT_ACTIVE_CPU_PERCENT = 5;
+const DEFAULT_ACTIVE_NETWORK_BYTES_PER_SECOND = 1024;
 
 function envMs(name: string, fallback: number) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-// Both thresholds are measured from the sandbox's last activity, not from when it was stopped.
+// Both thresholds are measured from the sandbox's last activity (or the end of its keep-alive lease,
+// whichever is later), not from when it was stopped.
 export const IDLE_STOP_MS = envMs("SANDBOX_IDLE_STOP_MS", DEFAULT_IDLE_STOP_MS);
 export const IDLE_DESTROY_MS = envMs("SANDBOX_IDLE_DESTROY_MS", DEFAULT_IDLE_DESTROY_MS);
 const SWEEP_INTERVAL_MS = envMs("SANDBOX_IDLE_SWEEP_INTERVAL_MS", DEFAULT_SWEEP_INTERVAL_MS);
 // PROVISIONING and DELETING normally last seconds. A row left in either for this long means the
 // process handling it died, so the reaper finishes the job.
 const STUCK_MS = envMs("SANDBOX_STUCK_MS", DEFAULT_STUCK_MS);
+// A running container doing at least this much work between two sweeps counts as active, so long
+// builds and background servers aren't mistaken for idle just because no API call came in.
+const ACTIVITY_THRESHOLDS = {
+  cpuPercent: envMs("SANDBOX_ACTIVE_CPU_PERCENT", DEFAULT_ACTIVE_CPU_PERCENT),
+  networkBytesPerSecond: envMs("SANDBOX_ACTIVE_NETWORK_BYTES_PER_SECOND", DEFAULT_ACTIVE_NETWORK_BYTES_PER_SECOND),
+};
 
 function formatDuration(ms: number) {
   const [value, unit] = ms >= 60_000 ? [Math.round(ms / 60_000), "minute"] : [Math.round(ms / 1000), "second"];
@@ -34,14 +44,15 @@ const DESTROYABLE_STATUSES: SandboxStatus[] = ["RUNNING", "STOPPED", "FAILED"];
 async function destroyIdleSandboxes() {
   const cutoff = new Date(Date.now() - IDLE_DESTROY_MS);
   const idle = await prisma.sandbox.findMany({
-    where: { status: { in: DESTROYABLE_STATUSES }, lastActivityAt: { lt: cutoff } },
+    where: { status: { in: DESTROYABLE_STATUSES }, ...idleSinceFilter(cutoff) },
     select: { id: true },
   });
 
   for (const { id } of idle) {
-    // Claim atomically so a request that just touched the sandbox, or another app instance, wins the race.
+    // Claim atomically so a request that just touched or leased the sandbox, or another app instance,
+    // wins the race.
     const claimed = await prisma.sandbox.updateMany({
-      where: { id, status: { in: DESTROYABLE_STATUSES }, lastActivityAt: { lt: cutoff } },
+      where: { id, status: { in: DESTROYABLE_STATUSES }, ...idleSinceFilter(cutoff) },
       data: { status: "DELETING" },
     });
     if (claimed.count === 0) continue;
@@ -58,7 +69,7 @@ async function destroyIdleSandboxes() {
 async function stopIdleSandboxes() {
   const cutoff = new Date(Date.now() - IDLE_STOP_MS);
   const idle = await prisma.sandbox.findMany({
-    where: { status: "RUNNING", lastActivityAt: { lt: cutoff } },
+    where: { status: "RUNNING", ...idleSinceFilter(cutoff) },
     select: { id: true },
   });
 
@@ -106,6 +117,10 @@ export async function reapIdleSandboxes() {
   // Reuses STUCK_MS as the grace period: a resource that young may belong to a create still in flight.
   try { await reconcileDockerResources(STUCK_MS); }
   catch (error) { console.error(`[idle-reaper] Docker reconciliation failed: ${errorMessage(error)}`); }
+  // Must run before the idle checks: it refreshes lastActivityAt for sandboxes that are busy inside
+  // the container, which is what keeps them out of the queries below.
+  try { await recordWorkloadActivity(ACTIVITY_THRESHOLDS); }
+  catch (error) { console.error(`[idle-reaper] Activity sampling failed: ${errorMessage(error)}`); }
   await destroyIdleSandboxes();
   await stopIdleSandboxes();
 }

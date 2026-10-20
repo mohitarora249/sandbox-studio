@@ -28,6 +28,7 @@ enum SandboxEventType {
   DELETED
   COMMAND_EXECUTED
   FAILED
+  KEEP_ALIVE
 }
 
 model Sandbox {
@@ -46,6 +47,9 @@ model Sandbox {
   lastCommandAt  DateTime?
   // Bumped whenever the sandbox is used; the idle reaper destroys sandboxes that go quiet.
   lastActivityAt DateTime      @default(now())
+  // Explicit "keep alive" lease. Until it expires the idle reaper neither stops nor destroys the
+  // sandbox, and the idle timers then count from the expiry rather than from lastActivityAt.
+  keepAliveUntil DateTime?
   startedAt      DateTime?
   stoppedAt      DateTime?
   createdAt      DateTime      @default(now())

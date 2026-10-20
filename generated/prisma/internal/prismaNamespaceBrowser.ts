@@ -86,6 +86,7 @@ export const SandboxScalarFieldEnum = {
   failureReason: 'failureReason',
   lastCommandAt: 'lastCommandAt',
   lastActivityAt: 'lastActivityAt',
+  keepAliveUntil: 'keepAliveUntil',
   startedAt: 'startedAt',
   stoppedAt: 'stoppedAt',
   createdAt: 'createdAt',

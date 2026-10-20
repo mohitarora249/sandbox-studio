@@ -15,4 +15,13 @@ export const commandSchema = z.object({
     .refine((value) => !value.includes("\u0000"), "Null bytes are not allowed"),
 });
 
+// Leases can be renewed as often as needed, but each one is capped so a forgotten sandbox still gets
+// cleaned up eventually.
+export const MAX_KEEP_ALIVE_MINUTES = 24 * 60;
+
+export const keepAliveSchema = z.object({
+  minutes: z.number().int("Minutes must be a whole number").min(1, "Keep alive for at least 1 minute")
+    .max(MAX_KEEP_ALIVE_MINUTES, `Keep alive for at most ${MAX_KEEP_ALIVE_MINUTES / 60} hours at a time`),
+});
+
 export type CreateSandboxInput = z.infer<typeof createSandboxSchema>;

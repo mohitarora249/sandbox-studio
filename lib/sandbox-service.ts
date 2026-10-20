@@ -18,9 +18,53 @@ export async function addSandboxEvent(
   });
 }
 
-// Record that the sandbox is in use so the idle reaper leaves it alone.
+// Record that the sandbox is in use so the idle reaper leaves it alone. Only call this for real use
+// (a command, a start, work seen inside the container), never from a read-only request.
 export async function touchSandbox(id: string) {
   await prisma.sandbox.update({ where: { id }, data: { lastActivityAt: new Date() } });
+}
+
+// Matches sandboxes that have been idle since before `cutoff`. A sandbox counts as idle from the later
+// of its last activity and the end of its keep-alive lease, so a lease that just ran out gives the
+// full idle grace period instead of letting the reaper stop and destroy it in the same sweep.
+export function idleSinceFilter(cutoff: Date): Prisma.SandboxWhereInput {
+  return {
+    lastActivityAt: { lt: cutoff },
+    OR: [{ keepAliveUntil: null }, { keepAliveUntil: { lt: cutoff } }],
+  };
+}
+
+// Only sandboxes that still have a workspace worth protecting can be leased.
+const LEASABLE_STATUSES: SandboxStatus[] = ["RUNNING", "STOPPED"];
+
+// Keeps the sandbox (and its workspace) safe from the idle reaper for the next `minutes`, replacing
+// any existing lease. Use this for unattended work the activity sampler can't see, e.g. a server
+// that sits quiet between requests. The status check is part of the update, so a sandbox the
+// reaper has already claimed for deletion can't be leased back to life.
+export async function keepSandboxAlive(id: string, minutes: number) {
+  const now = new Date();
+  const keepAliveUntil = new Date(now.getTime() + minutes * 60_000);
+  const leased = await prisma.sandbox.updateMany({
+    where: { id, status: { in: LEASABLE_STATUSES } },
+    data: { keepAliveUntil, lastActivityAt: now },
+  });
+  if (leased.count === 0) {
+    const exists = await prisma.sandbox.findUnique({ where: { id }, select: { id: true } });
+    throw new Error(exists ? "Only running or stopped sandboxes can be kept alive." : "Sandbox not found.");
+  }
+  await addSandboxEvent(id, "KEEP_ALIVE", `Sandbox kept alive until ${keepAliveUntil.toISOString()}.`, { minutes });
+  return prisma.sandbox.findUniqueOrThrow({ where: { id } });
+}
+
+// Ends the lease early. Releasing counts as activity, so the normal idle timers start from now
+// rather than from whenever the sandbox was last used before the lease.
+export async function releaseSandboxKeepAlive(id: string) {
+  const sandbox = await prisma.sandbox.findUnique({ where: { id } });
+  if (!sandbox) throw new Error("Sandbox not found.");
+  if (!sandbox.keepAliveUntil) return sandbox;
+  const updated = await prisma.sandbox.update({ where: { id }, data: { keepAliveUntil: null, lastActivityAt: new Date() } });
+  await addSandboxEvent(id, "KEEP_ALIVE", "Keep-alive lease released.");
+  return updated;
 }
 
 function isNotFound(error: unknown) {
@@ -69,11 +113,11 @@ export async function listSandboxes() {
   return Promise.all(rows.map((row) => syncSandboxStatus(row)));
 }
 
-// Every per-sandbox API call (view, logs, command) goes through here, so reading counts as activity.
+// Read-only: viewing a sandbox or its logs is not activity, otherwise leaving the detail page open
+// would keep an abandoned sandbox alive forever. Callers that do use the sandbox touch it themselves.
 export async function getSandbox(id: string) {
   const row = await prisma.sandbox.findUnique({ where: { id }, include: { events: { orderBy: { createdAt: "desc" }, take: 20 } } });
   if (!row) return null;
-  if (row.status !== "DELETED" && row.status !== "DELETING") await touchSandbox(id);
   const synced = await syncSandboxStatus(row);
   return { ...synced, events: row.events };
 }
@@ -210,7 +254,7 @@ export async function stopSandbox(id: string) {
 export async function stopIdleSandbox(id: string, idleSince: Date, reason: string) {
   const stoppedAt = new Date();
   const claimed = await prisma.sandbox.updateMany({
-    where: { id, status: "RUNNING", lastActivityAt: { lt: idleSince } },
+    where: { id, status: "RUNNING", ...idleSinceFilter(idleSince) },
     data: { status: "STOPPED", stoppedAt },
   });
   if (claimed.count === 0) return false;

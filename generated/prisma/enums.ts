@@ -35,7 +35,8 @@ export const SandboxEventType = {
   STOPPED: 'STOPPED',
   DELETED: 'DELETED',
   COMMAND_EXECUTED: 'COMMAND_EXECUTED',
-  FAILED: 'FAILED'
+  FAILED: 'FAILED',
+  KEEP_ALIVE: 'KEEP_ALIVE'
 } as const
 
 export type SandboxEventType = (typeof SandboxEventType)[keyof typeof SandboxEventType]

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Box, CheckCircle2, CircleStop, Clock3, Copy, Cpu, FileCode2, Globe, HardDrive, LoaderCircle, Play, RefreshCw, ShieldCheck, Terminal, Trash2, WifiOff, XCircle, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Box, CheckCircle2, CircleStop, Clock3, Copy, Cpu, FileCode2, Globe, HardDrive, Hourglass, LoaderCircle, Play, RefreshCw, ShieldCheck, Terminal, Trash2, WifiOff, XCircle, type LucideIcon } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,7 @@ type Sandbox = {
   containerId: string | null; volumeName: string | null; status: SandboxStatus; cpuCores: number; memoryMb: number;
   networkEnabled: boolean; failureReason: string | null; lastCommandAt: string | null; startedAt: string | null;
   stoppedAt: string | null; createdAt: string; updatedAt: string; events: EventItem[];
+  lastActivityAt: string; keepAliveUntil: string | null;
 };
 type CommandResult = { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean };
 
@@ -67,6 +68,22 @@ export function SandboxDetail({ id }: { id: string }) {
     finally { setBusy(false); }
   }
 
+  // Leases the sandbox so the idle reaper leaves it (and its workspace) alone while work runs
+  // unattended; minutes === null releases the lease instead.
+  async function setKeepAlive(minutes: number | null) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`/api/sandboxes/${id}/keep-alive`, minutes === null
+        ? { method: "DELETE" }
+        : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not update keep-alive lease.");
+      setNotice(minutes === null ? "Keep-alive lease released." : `Sandbox will be kept alive for ${minutes / 60} hour${minutes === 60 ? "" : "s"}.`);
+      await load(true);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not update keep-alive lease."); }
+    finally { setBusy(false); }
+  }
+
   async function loadLogs() {
     setLogsLoading(true); setError("");
     try {
@@ -97,6 +114,8 @@ export function SandboxDetail({ id }: { id: string }) {
 
   const running = sandbox.status === "RUNNING";
   const deleted = sandbox.status === "DELETED";
+  const leasable = running || sandbox.status === "STOPPED";
+  const leaseActive = !!sandbox.keepAliveUntil && new Date(sandbox.keepAliveUntil).getTime() > Date.now();
   return (
     <div className="flex min-h-screen bg-slate-50/80">
       <AppSidebar />
@@ -139,6 +158,7 @@ export function SandboxDetail({ id }: { id: string }) {
             </div>
 
             <div className="space-y-5">
+              {leasable && <Card className="p-5 sm:p-6"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Hourglass className="h-4 w-4 text-slate-500"/><h2 className="text-sm font-semibold text-slate-900">Idle protection</h2></div><Badge tone={leaseActive ? "success" : "muted"}>{leaseActive ? "Kept alive" : "Auto cleanup"}</Badge></div><p className="mt-3 text-xs leading-5 text-slate-500">Idle sandboxes are stopped and then deleted with their workspace. Commands and CPU or network use inside the container count as activity; viewing this page does not. Keep the sandbox alive while unattended work runs.</p><div className="mt-4 space-y-3"><ConfigRow label="Last activity" value={formatDate(sandbox.lastActivityAt)}/>{leaseActive && <ConfigRow label="Kept alive until" value={formatDate(sandbox.keepAliveUntil!)}/>}</div><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => void setKeepAlive(60)} disabled={busy}>Keep alive 1h</Button><Button size="sm" variant="secondary" onClick={() => void setKeepAlive(8 * 60)} disabled={busy}>Keep alive 8h</Button>{leaseActive && <Button size="sm" variant="ghost" onClick={() => void setKeepAlive(null)} disabled={busy}>Release</Button>}</div></Card>}
               <Card className="p-5 sm:p-6"><div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-600"/><h2 className="text-sm font-semibold text-slate-900">Isolation configuration</h2></div><div className="mt-4 space-y-3"><ConfigRow label="Run as non-root" value="UID / GID 10001"/><ConfigRow label="Root filesystem" value="Read-only"/><ConfigRow label="Linux capabilities" value="All dropped"/><ConfigRow label="Privilege escalation" value="Disabled"/><ConfigRow label="Process limit" value="128 PIDs"/><ConfigRow label="Writable path" value="/workspace only"/><ConfigRow label="Temporary storage" value="/tmp · 64 MB"/><ConfigRow label="Port publishing" value="None"/></div><div className="mt-4 rounded-lg bg-emerald-50 px-3 py-2.5 text-[10px] leading-5 text-emerald-800">Hardened for trusted local development, not a substitute for a VM or stronger sandbox runtime when executing hostile multi-tenant code.</div></Card>
               <Card className="p-5 sm:p-6"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-slate-500"/><h2 className="text-sm font-semibold text-slate-900">Lifecycle</h2></div><span className="text-[10px] text-slate-400">Recent events</span></div><div className="mt-4 space-y-4">{sandbox.events?.length ? sandbox.events.map((event) => <div key={event.id} className="flex gap-3"><div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500"><ActivityDot type={event.type}/></div><div className="min-w-0 flex-1"><div className="text-xs font-medium text-slate-800">{event.message}</div><div className="mt-1 text-[10px] text-slate-400">{formatDate(event.createdAt)}</div></div></div>) : <p className="text-xs text-slate-500">No lifecycle events have been recorded.</p>}</div></Card>
               {sandbox.containerId && <Card className="p-5 sm:p-6"><h2 className="text-sm font-semibold text-slate-900">Docker references</h2><div className="mt-4"><div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Container ID</div><div className="mt-1 break-all font-mono text-[10px] leading-5 text-slate-600">{sandbox.containerId}</div><Button variant="ghost" size="sm" className="mt-2 h-7 px-2 text-[10px]" onClick={() => void navigator.clipboard.writeText(sandbox.containerId || "")}><Copy className="h-3 w-3"/>Copy ID</Button></div><div className="mt-3 border-t border-slate-100 pt-3"><div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Workspace volume</div><div className="mt-1 break-all font-mono text-[10px] leading-5 text-slate-600">{sandbox.volumeName || "—"}</div></div></Card>}
