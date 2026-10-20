@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, hasValidOrigin } from "@/lib/auth";
 import { commandSchema } from "@/lib/validation";
@@ -41,19 +42,26 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const stream = await exec.start({ hijack: true, stdin: false });
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    let stdoutText = "";
-    let stderrText = "";
+    // Collect raw bytes and decode once at the end: decoding each chunk on its own corrupts any
+    // multi-byte UTF-8 character that straddles a chunk boundary.
+    const chunks: Record<"stdout" | "stderr", Buffer[]> = { stdout: [], stderr: [] };
+    const clippedStreams = new Set<"stdout" | "stderr">();
     let totalBytes = 0;
     let truncated = false;
     const capture = (target: "stdout" | "stderr") => (chunk: Buffer) => {
-      const value = chunk.toString("utf8");
       const remaining = MAX_OUTPUT_BYTES - totalBytes;
       if (remaining <= 0) { truncated = true; return; }
-      const clipped = value.slice(0, remaining);
-      if (target === "stdout") stdoutText += clipped;
-      else stderrText += clipped;
-      totalBytes += Buffer.byteLength(clipped);
-      if (clipped.length < value.length) truncated = true;
+      const clipped = chunk.subarray(0, remaining);
+      chunks[target].push(clipped);
+      totalBytes += clipped.length;
+      if (clipped.length < chunk.length) { truncated = true; clippedStreams.add(target); }
+    };
+    const decode = (target: "stdout" | "stderr") => {
+      const decoder = new StringDecoder("utf8");
+      const text = decoder.write(Buffer.concat(chunks[target]));
+      // write() holds back an incomplete trailing sequence. If the byte cap cut it, drop it rather
+      // than emitting a replacement character; otherwise flush it as the command really wrote it.
+      return clippedStreams.has(target) ? text : text + decoder.end();
     };
     stdout.on("data", capture("stdout"));
     stderr.on("data", capture("stderr"));
@@ -101,8 +109,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       timedOut: inspected.ExitCode === 124 || inspected.ExitCode === 137,
     });
     return NextResponse.json({
-      stdout: stdoutText,
-      stderr: stderrText,
+      stdout: decode("stdout"),
+      stderr: decode("stderr"),
       exitCode: inspected.ExitCode,
       timedOut: inspected.ExitCode === 124 || inspected.ExitCode === 137,
       truncated,
