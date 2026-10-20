@@ -30,6 +30,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-please-change-me}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       DOCKER_SOCKET: /var/run/docker.sock
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
     ports:
       # Bind only to localhost by default; a reverse proxy/authenticated tunnel can be added later.
       - "127.0.0.1:3000:3000"

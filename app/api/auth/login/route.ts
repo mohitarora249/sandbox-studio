@@ -7,6 +7,38 @@ import { createSessionToken, sessionCookieOptions } from "@/lib/auth";
 const attempts = new Map<string, { count: number; startedAt: number }>();
 const WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 8;
+// Caps attempts from all clients combined, so rotating the client key (or many addresses behind
+// a trusted proxy) cannot add guesses. It also bounds how many keys the map can hold per window.
+const MAX_GLOBAL_ATTEMPTS = 30;
+const GLOBAL_KEY = "*";
+// Number of reverse proxies in front of the app that append to X-Forwarded-For. With 0 (the
+// default, matching the localhost-only Compose setup) the header is client-controlled and ignored.
+const TRUSTED_PROXY_COUNT = Math.max(0, Number.parseInt(process.env.TRUSTED_PROXY_COUNT ?? "0", 10) || 0);
+let lastPrunedAt = 0;
+
+function clientKey(request: NextRequest) {
+  if (TRUSTED_PROXY_COUNT === 0) return "local";
+  // Each trusted proxy appends the address it received from, so the entry TRUSTED_PROXY_COUNT
+  // from the end was written by our outermost proxy. Anything to its left came from the client.
+  const hops = (request.headers.get("x-forwarded-for") ?? "").split(",").map((hop) => hop.trim()).filter(Boolean);
+  return hops[hops.length - TRUSTED_PROXY_COUNT] ?? "unknown";
+}
+
+function pruneExpired(now: number) {
+  if (now - lastPrunedAt < WINDOW_MS) return;
+  lastPrunedAt = now;
+  for (const [key, record] of attempts) {
+    if (now - record.startedAt > WINDOW_MS) attempts.delete(key);
+  }
+}
+
+function currentRecord(key: string, now: number) {
+  const previous = attempts.get(key);
+  if (previous && now - previous.startedAt <= WINDOW_MS) return previous;
+  const record = { count: 0, startedAt: now };
+  attempts.set(key, record);
+  return record;
+}
 
 function fixedTimeEquals(left: string, right: string) {
   // Hash first so timingSafeEqual always receives two buffers of the same length.
@@ -16,16 +48,17 @@ function fixedTimeEquals(left: string, right: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const clientKey = forwardedFor || "local";
   const now = Date.now();
-  const previous = attempts.get(clientKey);
-  const record = !previous || now - previous.startedAt > WINDOW_MS
-    ? { count: 0, startedAt: now }
-    : previous;
-  if (record.count >= MAX_ATTEMPTS) {
+  pruneExpired(now);
+  const key = clientKey(request);
+  const record = currentRecord(key, now);
+  const global = currentRecord(GLOBAL_KEY, now);
+  if (record.count >= MAX_ATTEMPTS || global.count >= MAX_GLOBAL_ATTEMPTS) {
     return NextResponse.json({ error: "Too many login attempts. Wait a minute and try again." }, { status: 429 });
   }
+  // Count the attempt before any await so concurrent requests cannot all pass the check above.
+  record.count += 1;
+  global.count += 1;
 
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
@@ -40,12 +73,11 @@ export async function POST(request: NextRequest) {
 
   const valid = fixedTimeEquals(input.username, expectedUsername) && fixedTimeEquals(input.password, expectedPassword);
   if (!valid) {
-    record.count += 1;
-    attempts.set(clientKey, record);
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
   }
 
-  attempts.delete(clientKey);
+  attempts.delete(key);
+  global.count -= 1;
   try {
     const token = await createSessionToken();
     const response = NextResponse.json({ ok: true });
