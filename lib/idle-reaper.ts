@@ -43,7 +43,7 @@ async function destroyIdleSandboxes() {
     try {
       await deleteSandbox(id, `Sandbox destroyed after ${formatDuration(IDLE_DESTROY_MS)} of inactivity.`);
     } catch (error) {
-      // deleteSandbox already marks the record FAILED with the reason; keep sweeping the rest.
+      // deleteSandbox leaves the record DELETING with the reason, so recoverStuckSandboxes retries it.
       console.error(`[idle-reaper] Failed to destroy sandbox ${id}: ${errorMessage(error)}`);
     }
   }
