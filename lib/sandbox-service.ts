@@ -27,6 +27,8 @@ function isNotFound(error: unknown) {
 }
 
 // Ask Docker for the actual state, so the dashboard doesn't rely solely on a possibly stale DB status.
+// DELETING is skipped on purpose: a live container would flip it back to RUNNING mid-delete. Rows
+// stuck in DELETING or PROVISIONING are recovered by the idle reaper instead.
 export async function syncSandboxStatus(sandbox: Sandbox): Promise<Sandbox> {
   if (!sandbox.containerId || sandbox.status === "DELETED" || sandbox.status === "DELETING") return sandbox;
   try {
@@ -200,21 +202,44 @@ export async function stopSandbox(id: string, idleReason?: string) {
   return updated;
 }
 
+// Removes the sandbox's container(s) and workspace volume; already-missing resources are fine.
+// Containers are also found by label, since a crash mid-provisioning can leave one that was never
+// recorded in containerId. Containers go first because Docker won't remove a volume still in use.
+async function removeSandboxResources(sandbox: Pick<Sandbox, "id" | "containerId" | "volumeName">) {
+  const docker = getDocker();
+  const labeled = await docker.listContainers({ all: true, filters: { label: [`sandbox-studio.sandbox-id=${sandbox.id}`] } });
+  const containerIds = new Set([...(sandbox.containerId ? [sandbox.containerId] : []), ...labeled.map((c) => c.Id)]);
+  for (const containerId of containerIds) {
+    try { await docker.getContainer(containerId).remove({ force: true, v: false }); }
+    catch (error) { if (!isNotFound(error)) throw error; }
+  }
+  if (sandbox.volumeName) {
+    try { await docker.getVolume(sandbox.volumeName).remove(); }
+    catch (error) { if (!isNotFound(error)) throw error; }
+  }
+}
+
+// Cleans up after a createSandbox call that never finished (e.g. the server crashed mid-way) and
+// marks the record FAILED, mirroring createSandbox's own failure path. Throws if cleanup fails,
+// leaving the record PROVISIONING so the reaper retries later.
+export async function failInterruptedProvisioning(id: string, reason: string) {
+  const sandbox = await prisma.sandbox.findUnique({ where: { id } });
+  if (!sandbox || sandbox.status !== "PROVISIONING") return;
+  await removeSandboxResources(sandbox);
+  await prisma.sandbox.update({
+    where: { id },
+    data: { status: "FAILED", containerId: null, volumeName: null, failureReason: reason },
+  });
+  await addSandboxEvent(id, "FAILED", "Sandbox provisioning failed.", { reason });
+}
+
 export async function deleteSandbox(id: string, eventMessage = "Sandbox container and workspace volume removed.") {
   const sandbox = await prisma.sandbox.findUnique({ where: { id } });
   if (!sandbox) throw new Error("Sandbox not found.");
   if (sandbox.status === "DELETED") return sandbox;
   await prisma.sandbox.update({ where: { id }, data: { status: "DELETING" } });
   try {
-    const docker = getDocker();
-    if (sandbox.containerId) {
-      try { await docker.getContainer(sandbox.containerId).remove({ force: true, v: false }); }
-      catch (error) { if (!isNotFound(error)) throw error; }
-    }
-    if (sandbox.volumeName) {
-      try { await docker.getVolume(sandbox.volumeName).remove(); }
-      catch (error) { if (!isNotFound(error)) throw error; }
-    }
+    await removeSandboxResources(sandbox);
   } catch (error) {
     await prisma.sandbox.update({ where: { id }, data: { status: "FAILED", failureReason: `Delete failed: ${errorMessage(error)}` } });
     throw error;

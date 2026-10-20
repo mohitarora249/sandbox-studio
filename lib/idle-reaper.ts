@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { deleteSandbox, stopSandbox } from "@/lib/sandbox-service";
+import { deleteSandbox, failInterruptedProvisioning, stopSandbox } from "@/lib/sandbox-service";
 import { errorMessage } from "@/lib/docker";
 
 const DEFAULT_IDLE_STOP_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_DESTROY_MS = 10 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 30 * 1000;
+const DEFAULT_STUCK_MS = 10 * 60 * 1000;
 
 function envMs(name: string, fallback: number) {
   const value = Number(process.env[name]);
@@ -15,6 +16,9 @@ function envMs(name: string, fallback: number) {
 export const IDLE_STOP_MS = envMs("SANDBOX_IDLE_STOP_MS", DEFAULT_IDLE_STOP_MS);
 export const IDLE_DESTROY_MS = envMs("SANDBOX_IDLE_DESTROY_MS", DEFAULT_IDLE_DESTROY_MS);
 const SWEEP_INTERVAL_MS = envMs("SANDBOX_IDLE_SWEEP_INTERVAL_MS", DEFAULT_SWEEP_INTERVAL_MS);
+// PROVISIONING and DELETING normally last seconds. A row left in either for this long means the
+// process handling it died, so the reaper finishes the job.
+const STUCK_MS = envMs("SANDBOX_STUCK_MS", DEFAULT_STUCK_MS);
 
 function formatDuration(ms: number) {
   const [value, unit] = ms >= 60_000 ? [Math.round(ms / 60_000), "minute"] : [Math.round(ms / 1000), "second"];
@@ -65,7 +69,37 @@ async function stopIdleSandboxes() {
   }
 }
 
+// Recovers sandboxes whose create or delete was interrupted: PROVISIONING rows are cleaned up and
+// marked FAILED, DELETING rows have their delete finished.
+async function recoverStuckSandboxes() {
+  const cutoff = new Date(Date.now() - STUCK_MS);
+  const stuck = await prisma.sandbox.findMany({
+    where: { status: { in: ["PROVISIONING", "DELETING"] }, updatedAt: { lt: cutoff } },
+    select: { id: true, status: true, updatedAt: true },
+  });
+
+  for (const { id, status, updatedAt } of stuck) {
+    // Claim by bumping updatedAt, so another app instance skips this row and a failed attempt is
+    // only retried after another STUCK_MS.
+    const claimed = await prisma.sandbox.updateMany({
+      where: { id, status, updatedAt },
+      data: { updatedAt: new Date() },
+    });
+    if (claimed.count === 0) continue;
+    try {
+      if (status === "PROVISIONING") {
+        await failInterruptedProvisioning(id, "Provisioning was interrupted before it finished; leftover resources were removed.");
+      } else {
+        await deleteSandbox(id, "Interrupted delete completed: sandbox container and workspace volume removed.");
+      }
+    } catch (error) {
+      console.error(`[idle-reaper] Failed to recover sandbox ${id} stuck in ${status}: ${errorMessage(error)}`);
+    }
+  }
+}
+
 export async function reapIdleSandboxes() {
+  await recoverStuckSandboxes();
   await destroyIdleSandboxes();
   await stopIdleSandboxes();
 }
