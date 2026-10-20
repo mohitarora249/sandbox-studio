@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, hasValidOrigin } from "@/lib/auth";
 import { commandSchema } from "@/lib/validation";
 import { getSandbox, addSandboxEvent } from "@/lib/sandbox-service";
-import { getDocker } from "@/lib/docker";
+import { getDocker, killStrayProcesses } from "@/lib/docker";
 import { prisma } from "@/lib/prisma";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // The command text is passed as one argument to a shell inside the sandbox, never interpolated
     // into the Docker API request itself. This endpoint is an admin-only remote shell by design.
     // `timeout` caps execution; the workspace is writable but the container root filesystem is not.
+    // Anything the command detached escapes `timeout`, so strays are killed once the exec exits.
     const exec = await container.exec({
       Cmd: ["/usr/bin/timeout", "--signal=KILL", "15s", "/bin/sh", "-lc", parsed.data.command],
       AttachStdout: true,
@@ -63,18 +64,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
     docker.modem.demuxStream(stream, stdout, stderr);
 
+    // A detached process that inherited stdout keeps the stream open after the shell exits, so wait
+    // for the exec itself to finish rather than only for the stream to end.
     let timer: NodeJS.Timeout | undefined;
+    let stopPolling = false;
+    const execExited = (async () => {
+      while (!stopPolling) {
+        if (!(await exec.inspect()).Running) return;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    })();
     try {
       await Promise.race([
         completed,
+        execExited,
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Command output stream timed out.")), 20_000); }),
       ]);
     } catch (error) {
       stream.destroy();
       throw error;
     } finally {
+      stopPolling = true;
       if (timer) clearTimeout(timer);
+      await killStrayProcesses(container).catch(() => undefined);
     }
+
+    // With the strays gone the stream ends on its own; don't wait on it indefinitely if it doesn't.
+    await Promise.race([completed, new Promise((resolve) => setTimeout(resolve, 2_000))]).catch(() => undefined);
+    stream.destroy();
 
     const inspected = await exec.inspect();
     await prisma.sandbox.update({ where: { id }, data: { lastCommandAt: new Date(), lastActivityAt: new Date() } });
