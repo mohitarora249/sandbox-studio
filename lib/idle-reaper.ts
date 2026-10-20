@@ -1,6 +1,6 @@
 import type { SandboxStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { deleteSandbox, failInterruptedProvisioning, reconcileDockerResources, stopSandbox } from "@/lib/sandbox-service";
+import { deleteSandbox, failInterruptedProvisioning, reconcileDockerResources, stopIdleSandbox } from "@/lib/sandbox-service";
 import { errorMessage } from "@/lib/docker";
 
 const DEFAULT_IDLE_STOP_MS = 5 * 60 * 1000;
@@ -63,11 +63,9 @@ async function stopIdleSandboxes() {
   });
 
   for (const { id } of idle) {
-    // Re-check right before stopping in case the sandbox was used since the query above.
-    const stillIdle = await prisma.sandbox.count({ where: { id, status: "RUNNING", lastActivityAt: { lt: cutoff } } });
-    if (!stillIdle) continue;
+    // stopIdleSandbox claims the row atomically, so a sandbox used since the query above is skipped.
     try {
-      await stopSandbox(id, `Sandbox stopped after ${formatDuration(IDLE_STOP_MS)} of inactivity.`);
+      await stopIdleSandbox(id, cutoff, `Sandbox stopped after ${formatDuration(IDLE_STOP_MS)} of inactivity.`);
     } catch (error) {
       console.error(`[idle-reaper] Failed to stop sandbox ${id}: ${errorMessage(error)}`);
     }

@@ -1,6 +1,7 @@
 import { Prisma, SandboxEventType, SandboxRuntime, SandboxStatus, type Sandbox } from "@/generated/prisma/client";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type Docker from "dockerode";
 import { getDocker, RUNTIME_IMAGES, errorMessage } from "@/lib/docker";
 import type { CreateSandboxInput } from "@/lib/validation";
 
@@ -184,22 +185,57 @@ export async function startSandbox(id: string) {
   return updated;
 }
 
-// `idleReason` marks an automatic stop by the idle reaper, which must not count as activity.
-export async function stopSandbox(id: string, idleReason?: string) {
+async function stopContainer(container: Docker.Container) {
+  await container.stop({ t: 5 }).catch((error: unknown) => {
+    if (!(typeof error === "object" && error !== null && "statusCode" in error && [304, 404].includes(Number((error as { statusCode?: number }).statusCode)))) throw error;
+  });
+}
+
+export async function stopSandbox(id: string) {
   const { sandbox, container } = await requireSandboxWithContainer(id);
   if (!sandbox) throw new Error("Sandbox not found.");
   if (sandbox.status === "DELETED") throw new Error("This sandbox has been deleted.");
-  if (container) {
-    await container.stop({ t: 5 }).catch((error: unknown) => {
-      if (!(typeof error === "object" && error !== null && "statusCode" in error && [304, 404].includes(Number((error as { statusCode?: number }).statusCode)))) throw error;
-    });
-  }
+  if (container) await stopContainer(container);
   const updated = await prisma.sandbox.update({
     where: { id },
-    data: { status: "STOPPED", stoppedAt: new Date(), ...(idleReason ? {} : { lastActivityAt: new Date() }) },
+    data: { status: "STOPPED", stoppedAt: new Date(), lastActivityAt: new Date() },
   });
-  await addSandboxEvent(id, "STOPPED", idleReason ?? "Sandbox stopped.");
+  await addSandboxEvent(id, "STOPPED", "Sandbox stopped.");
   return updated;
+}
+
+// Stops a sandbox for the idle reaper, which must not count as activity. The row is claimed (moved to
+// STOPPED) before Docker is touched, so activity that lands first makes the claim fail and the
+// sandbox keeps running. Returns whether the sandbox was stopped.
+export async function stopIdleSandbox(id: string, idleSince: Date, reason: string) {
+  const stoppedAt = new Date();
+  const claimed = await prisma.sandbox.updateMany({
+    where: { id, status: "RUNNING", lastActivityAt: { lt: idleSince } },
+    data: { status: "STOPPED", stoppedAt },
+  });
+  if (claimed.count === 0) return false;
+
+  const { sandbox, container } = await requireSandboxWithContainer(id);
+  if (container) {
+    try {
+      await stopContainer(container);
+    } catch (error) {
+      // Undo the claim so the row matches the still-running container and the next sweep retries.
+      await prisma.sandbox.updateMany({ where: { id, status: "STOPPED", stoppedAt }, data: { status: "RUNNING", stoppedAt: sandbox?.stoppedAt ?? null } });
+      throw error;
+    }
+    // A Start that arrived while the container was stopping has already set the row back to RUNNING.
+    // Honour it rather than leaving the user with a stopped container.
+    const current = await prisma.sandbox.findUnique({ where: { id }, select: { status: true } });
+    if (current?.status === "RUNNING") {
+      await container.start().catch((error: unknown) => {
+        if (!(typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: number }).statusCode === 304)) throw error;
+      });
+      return false;
+    }
+  }
+  await addSandboxEvent(id, "STOPPED", reason);
+  return true;
 }
 
 // Removes the sandbox's container(s) and workspace volume; already-missing resources are fine.
