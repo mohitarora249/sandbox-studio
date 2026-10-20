@@ -1,0 +1,63 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sandbox
+      POSTGRES_PASSWORD: sandbox_dev_password
+      POSTGRES_DB: sandbox_studio
+    ports:
+      # Optional host-only access for local database tools. The app connects over the Compose network.
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - sandbox-studio-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandbox -d sandbox_studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://sandbox:sandbox_dev_password@db:5432/sandbox_studio?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-local-dev-only-change-this-secret-before-deploying-2026}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-please-change-me}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      DOCKER_SOCKET: /var/run/docker.sock
+    ports:
+      # Bind only to localhost by default; a reverse proxy/authenticated tunnel can be added later.
+      - "127.0.0.1:3000:3000"
+    group_add:
+      # On Linux, group 0 commonly owns the Docker socket. Adjust to the socket's actual group if needed.
+      - "${DOCKER_GID:-0}"
+    volumes:
+      # VERY PRIVILEGED: access to the Docker socket can effectively grant host-level control.
+      # Keep this dashboard local/trusted. Never expose it publicly without stronger isolation.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  # These services exist to build/tag approved runtime images. They are built explicitly, not started.
+  node-runtime-image:
+    image: sandbox-studio/node-runtime:22
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+      target: node-runtime
+    profiles: ["build-runtimes"]
+
+  python-runtime-image:
+    image: sandbox-studio/python-runtime:3.12
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+      target: python-runtime
+    profiles: ["build-runtimes"]
+
+volumes:
+  sandbox-studio-db:

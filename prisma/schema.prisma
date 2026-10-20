@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SandboxRuntime {
+  NODE
+  PYTHON
+}
+
+enum SandboxStatus {
+  PROVISIONING
+  RUNNING
+  STOPPED
+  FAILED
+  DELETING
+  DELETED
+}
+
+enum SandboxEventType {
+  CREATED
+  STARTED
+  STOPPED
+  DELETED
+  COMMAND_EXECUTED
+  FAILED
+}
+
+model Sandbox {
+  id             String        @id @default(cuid())
+  name           String
+  description    String?       @db.Text
+  runtime        SandboxRuntime
+  image          String
+  containerId    String?       @unique
+  volumeName     String?       @unique
+  status         SandboxStatus @default(PROVISIONING)
+  cpuCores       Float         @default(0.5)
+  memoryMb       Int           @default(512)
+  networkEnabled Boolean       @default(false)
+  failureReason  String?       @db.Text
+  lastCommandAt  DateTime?
+  startedAt      DateTime?
+  stoppedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  events         SandboxEvent[]
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+model SandboxEvent {
+  id        String           @id @default(cuid())
+  sandboxId String
+  type      SandboxEventType
+  message   String           @db.Text
+  metadata  Json?
+  createdAt DateTime         @default(now())
+  sandbox   Sandbox          @relation(fields: [sandboxId], references: [id], onDelete: Cascade)
+
+  @@index([sandboxId, createdAt])
+}

@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 33% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 224 76% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 20% 96%;
+    --secondary-foreground: 222 34% 20%;
+    --muted: 220 20% 96%;
+    --muted-foreground: 220 10% 47%;
+    --accent: 225 70% 97%;
+    --accent-foreground: 224 76% 38%;
+    --destructive: 0 72% 51%;
+    --border: 220 17% 90%;
+    --input: 220 17% 87%;
+    --ring: 224 76% 48%;
+    --radius: 0.8rem;
+  }
+  * { @apply border-border; }
+  html { scroll-behavior: smooth; }
+  body { @apply bg-background text-foreground antialiased; font-feature-settings: "ss01" on, "cv11" on; }
+  button, input, textarea, select { font: inherit; }
+}
+
+@layer components {
+  .field-label { @apply mb-2 block text-sm font-medium text-slate-700; }
+  .field-help { @apply mt-1.5 text-xs leading-5 text-slate-500; }
+  .panel { @apply rounded-2xl border border-slate-200/80 bg-white shadow-panel; }
+  .eyebrow { @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500; }
+}
+
+::selection { background: rgba(79, 100, 230, 0.17); }

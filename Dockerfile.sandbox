@@ -1,0 +1,26 @@
+# The two target images have a common sandbox contract:
+# - non-root UID/GID 10001
+# - writable /workspace volume only
+# - no application-specific port exposed
+# - API-created containers get CPU/RAM/PID limits and a read-only root filesystem
+FROM node:22-alpine AS node-runtime
+RUN apk add --no-cache coreutils \
+  && addgroup -S -g 10001 sandbox \
+  && adduser -S -D -H -u 10001 -G sandbox sandbox \
+  && mkdir -p /workspace/.home \
+  && chown -R 10001:10001 /workspace
+ENV HOME=/workspace/.home TMPDIR=/tmp
+WORKDIR /workspace
+USER 10001:10001
+CMD ["sh", "-lc", "while true; do sleep 3600; done"]
+
+FROM python:3.12-alpine AS python-runtime
+RUN apk add --no-cache coreutils \
+  && addgroup -S -g 10001 sandbox \
+  && adduser -S -D -H -u 10001 -G sandbox sandbox \
+  && mkdir -p /workspace/.home /workspace/.cache/pip \
+  && chown -R 10001:10001 /workspace
+ENV HOME=/workspace/.home TMPDIR=/tmp PIP_CACHE_DIR=/workspace/.cache/pip PYTHONUSERBASE=/workspace/.local PIP_USER=1
+WORKDIR /workspace
+USER 10001:10001
+CMD ["sh", "-lc", "while true; do sleep 3600; done"]
