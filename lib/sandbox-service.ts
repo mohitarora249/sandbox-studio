@@ -6,6 +6,16 @@ import { getDocker, RUNTIME_IMAGES, errorMessage } from "@/lib/docker";
 import type { CreateSandboxInput } from "@/lib/validation";
 
 const BYTES_PER_MB = 1024 * 1024;
+const DEFAULT_DISK_QUOTA_MB = 2048;
+
+// Workspace disk quota; enforcement is described in lib/disk-quota.ts.
+const configuredDiskQuotaMb = Number(process.env.SANDBOX_DISK_QUOTA_MB);
+export const DISK_QUOTA_MB = Number.isFinite(configuredDiskQuotaMb) && configuredDiskQuotaMb > 0
+  ? Math.floor(configuredDiskQuotaMb)
+  : DEFAULT_DISK_QUOTA_MB;
+export const DISK_QUOTA_BYTES = DISK_QUOTA_MB * BYTES_PER_MB;
+// Only for hosts whose Docker data root is on XFS mounted with pquota; elsewhere volume creation fails.
+const HARD_DISK_QUOTA = process.env.SANDBOX_DISK_QUOTA_HARD === "true";
 
 export async function addSandboxEvent(
   sandboxId: string,
@@ -148,6 +158,7 @@ export async function createSandbox(input: CreateSandboxInput) {
     await docker.createVolume({
       Name: volumeName,
       Labels: { "sandbox-studio.managed": "true", "sandbox-studio.sandbox-id": dbRecord.id },
+      ...(HARD_DISK_QUOTA ? { DriverOpts: { size: `${DISK_QUOTA_MB}m` } } : {}),
     });
 
     const container = await docker.createContainer({
@@ -168,6 +179,9 @@ export async function createSandbox(input: CreateSandboxInput) {
         Memory: input.memoryMb * BYTES_PER_MB,
         MemorySwap: input.memoryMb * BYTES_PER_MB,
         PidsLimit: 128,
+        // No single file can outgrow the workspace quota, so one runaway write can't fill the host
+        // disk between disk-quota sweeps. The writing process gets SIGXFSZ at the limit.
+        Ulimits: [{ Name: "fsize", Soft: DISK_QUOTA_BYTES, Hard: DISK_QUOTA_BYTES }],
         Init: true,
         ReadonlyRootfs: true,
         CapDrop: ["ALL"],
@@ -188,7 +202,7 @@ export async function createSandbox(input: CreateSandboxInput) {
     });
     await addSandboxEvent(updated.id, "CREATED", "Sandbox created and started.", {
       image, cpuCores: input.cpuCores, memoryMb: input.memoryMb,
-      networkEnabled: input.networkEnabled,
+      networkEnabled: input.networkEnabled, diskQuotaMb: DISK_QUOTA_MB,
     });
     return updated;
   } catch (error) {
@@ -203,6 +217,9 @@ export async function createSandbox(input: CreateSandboxInput) {
       data: { status: "FAILED", containerId: null, volumeName: null, failureReason: message },
     });
     await addSandboxEvent(dbRecord.id, "FAILED", "Sandbox provisioning failed.", { reason: message });
+    if (message.includes("no quota support")) {
+      throw new Error("SANDBOX_DISK_QUOTA_HARD is on, but Docker's data root does not support volume quotas (it needs XFS mounted with pquota). Turn it off to rely on the soft quota.");
+    }
     throw new Error(message.includes("No such image") || message.includes("not found")
       ? `Runtime image ${image} is missing. Build the runtime images first (see README.md).`
       : `Could not create sandbox: ${message}`);
@@ -248,13 +265,24 @@ export async function stopSandbox(id: string) {
   return updated;
 }
 
-// Stops a sandbox for the idle reaper, which must not count as activity. The row is claimed (moved to
-// STOPPED) before Docker is touched, so activity that lands first makes the claim fail and the
-// sandbox keeps running. Returns whether the sandbox was stopped.
+// Stops a sandbox for the idle reaper, which must not count as activity. Returns whether the sandbox
+// was stopped.
 export async function stopIdleSandbox(id: string, idleSince: Date, reason: string) {
+  return stopSandboxForReaper(id, idleSinceFilter(idleSince), reason);
+}
+
+// Stops a sandbox whose workspace is over the disk quota, whether or not it is idle. Returns whether
+// the sandbox was stopped.
+export async function stopOverQuotaSandbox(id: string, reason: string, metadata: Prisma.InputJsonValue) {
+  return stopSandboxForReaper(id, {}, reason, metadata);
+}
+
+// The row is claimed (moved to STOPPED) before Docker is touched, so a claim condition that stops
+// holding first (e.g. activity on an idle sandbox) makes the claim fail and the sandbox keeps running.
+async function stopSandboxForReaper(id: string, claimWhere: Prisma.SandboxWhereInput, reason: string, metadata?: Prisma.InputJsonValue) {
   const stoppedAt = new Date();
   const claimed = await prisma.sandbox.updateMany({
-    where: { id, status: "RUNNING", ...idleSinceFilter(idleSince) },
+    where: { id, status: "RUNNING", ...claimWhere },
     data: { status: "STOPPED", stoppedAt },
   });
   if (claimed.count === 0) return false;
@@ -278,7 +306,7 @@ export async function stopIdleSandbox(id: string, idleSince: Date, reason: strin
       return false;
     }
   }
-  await addSandboxEvent(id, "STOPPED", reason);
+  await addSandboxEvent(id, "STOPPED", reason, metadata);
   return true;
 }
 

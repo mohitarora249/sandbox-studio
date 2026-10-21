@@ -2,6 +2,7 @@ import type { SandboxStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteSandbox, failInterruptedProvisioning, idleSinceFilter, reconcileDockerResources, stopIdleSandbox } from "@/lib/sandbox-service";
 import { recordWorkloadActivity } from "@/lib/activity-sampler";
+import { enforceDiskQuotas } from "@/lib/disk-quota";
 import { errorMessage } from "@/lib/docker";
 
 const DEFAULT_IDLE_STOP_MS = 5 * 60 * 1000;
@@ -121,6 +122,8 @@ export async function reapIdleSandboxes() {
   // the container, which is what keeps them out of the queries below.
   try { await recordWorkloadActivity(ACTIVITY_THRESHOLDS); }
   catch (error) { console.error(`[idle-reaper] Activity sampling failed: ${errorMessage(error)}`); }
+  try { await enforceDiskQuotas(); }
+  catch (error) { console.error(`[idle-reaper] Disk quota check failed: ${errorMessage(error)}`); }
   await destroyIdleSandboxes();
   await stopIdleSandboxes();
 }
